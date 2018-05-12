@@ -1,3 +1,4 @@
+/* eslint-env browser */
 //    WebSockets Audio API
 //
 //    Opus Quality Settings
@@ -5,6 +6,7 @@
 //    App: 2048=voip, 2049=audio, 2051=low-delay
 //    Sample Rate: 8000, 12000, 16000, 24000, or 48000
 //    Frame Duration: 2.5, 5, 10, 20, 40, 60
+//    Packet Duration: frame duration * number of frames in a packet
 //    Buffer Size = sample rate/6000 * 1024
 
 (function(global) {
@@ -14,24 +16,21 @@
 			channels: 1,
 			app: 2048,
 			frameDuration: 20,
+            packetDuration: 20,
 			bufferSize: 4096
-		},
-		server: {
-			host: window.location.hostname,
-			port: 5000
 		}
 	};
 
 	var audioContext = new(window.AudioContext || window.webkitAudioContext)();
 
 	var WSAudioAPI = global.WSAudioAPI = {
-		Player: function(config, socket) {
+		Player: function(config) {
 			this.config = {};
-			this.config.codec = this.config.codec || defaultConfig.codec;
-			this.config.server = this.config.server || defaultConfig.server;
+			this.config.codec = config.codec || defaultConfig.codec;
+          
+            var framesPerPacket = this.config.codec.packetDuration / this.config.codec.frameDuration;
 			this.sampler = new Resampler(this.config.codec.sampleRate, 44100, 1, this.config.codec.bufferSize);
-			this.parentSocket = socket;
-			this.decoder = new OpusDecoder(this.config.codec.sampleRate, this.config.codec.channels);
+			this.decoder = new OpusDecoder(this.config.codec.sampleRate, this.config.codec.channels, framesPerPacket);
 			this.silence = new Float32Array(this.config.codec.bufferSize);
 		},
 		Streamer: function(config, socket) {
@@ -188,35 +187,11 @@
 		this.gainNode = audioContext.createGain();
 		this.scriptNode.connect(this.gainNode);
 		this.gainNode.connect(audioContext.destination);
-
-		if (!this.parentSocket) {
-			this.socket = new WebSocket('wss://' + this.config.server.host + ':' + this.config.server.port);
-		} else {
-			this.socket = this.parentSocket;
-		}
-        //this.socket.onopen = function () {
-        //    console.log('Connected to server ' + _this.config.server.host + ' as listener');
-        //};
-        var _onmessage = this.parentOnmessage = this.socket.onmessage;
-        this.socket.onmessage = function(message) {
-        	if (_onmessage) {
-        		_onmessage(message);
-        	}
-        	if (message.data instanceof Blob) {
-        		var reader = new FileReader();
-        		reader.onload = function() {
-        			_this.audioQueue.write(_this.decoder.decode_float(reader.result));
-        		};
-        		reader.readAsArrayBuffer(message.data);
-        	}
-        };
-        //this.socket.onclose = function () {
-        //    console.log('Connection to server closed');
-        //};
-        //this.socket.onerror = function (err) {
-        //    console.log('Getting audio data error:', err);
-        //};
       };
+      
+      WSAudioAPI.Player.prototype.addPacket = function(packet) {
+        this.audioQueue.write(this.decoder.decode_float(packet));
+      }
 
       WSAudioAPI.Player.prototype.getVolume = function() {
       	return this.gainNode ? this.gainNode.gain.value : 'Stream not started yet';
@@ -232,11 +207,5 @@
       	this.scriptNode = null;
       	this.gainNode.disconnect();
       	this.gainNode = null;
-
-      	if (!this.parentSocket) {
-      		this.socket.close();
-      	} else {
-      		this.socket.onmessage = this.parentOnmessage;
-      	}
       };
     })(window);

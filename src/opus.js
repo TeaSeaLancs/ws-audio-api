@@ -24,9 +24,10 @@ var Opus = (function () {
         var ptr = _opus_get_version_string();
         return Pointer_stringify(ptr);
     };
-    Opus.getMaxFrameSize = function (numberOfStreams) {
+    Opus.getMaxFrameSize = function (numberOfStreams, framesPerPacket) {
         if (numberOfStreams === void 0) { numberOfStreams = 1; }
-        return (1275 * 3 + 7) * numberOfStreams;
+        if (framesPerPacket === void 0) { framesPerPacket = 1; }
+        return (1275 * 3 + 7) * numberOfStreams * framesPerPacket;
     };
     Opus.getMinFrameDuration = function () {
         return 2.5;
@@ -39,8 +40,9 @@ var Opus = (function () {
             return element == x;
         });
     };
-    Opus.getMaxSamplesPerChannel = function (sampling_rate) {
-        return sampling_rate / 1000 * Opus.getMaxFrameDuration();
+    Opus.getMaxSamplesPerChannel = function (sampling_rate, framesPerPacket) {
+        if (framesPerPacket === void 0) { framesPerPacket = 1; }
+        return (sampling_rate / 1000 * Opus.getMaxFrameDuration()) * framesPerPacket;
     };
     return Opus;
 })();
@@ -153,18 +155,19 @@ var OpusEncoder = (function () {
     return OpusEncoder;
 })();
 var OpusDecoder = (function () {
-    function OpusDecoder(sampling_rate, channels) {
+    function OpusDecoder(sampling_rate, channels, framesPerPacket) {
         this.handle = 0;
         this.in_ptr = 0;
         this.out_ptr = 0;
         this.channels = channels;
+        this.framesPerPacket = framesPerPacket;
         var err_ptr = allocate(4, 'i32', ALLOC_STACK);
         this.handle = _opus_decoder_create(sampling_rate, channels, err_ptr);
         if (getValue(err_ptr, 'i32') != 0 /* OK */)
             throw 'opus_decoder_create failed: ' + getValue(err_ptr, 'i32');
-        this.in_ptr = _malloc(Opus.getMaxFrameSize(channels));
-        this.in_buf = HEAPU8.subarray(this.in_ptr, this.in_ptr + Opus.getMaxFrameSize(channels));
-        this.out_len = Opus.getMaxSamplesPerChannel(sampling_rate);
+        this.in_ptr = _malloc(Opus.getMaxFrameSize(channels, framesPerPacket));
+        this.in_buf = HEAPU8.subarray(this.in_ptr, this.in_ptr + Opus.getMaxFrameSize(channels, framesPerPacket));
+        this.out_len = Opus.getMaxSamplesPerChannel(sampling_rate, framesPerPacket);
         var out_bytes = this.out_len * channels * 4;
         this.out_ptr = _malloc(out_bytes);
         this.out_i16 = HEAP16.subarray(this.out_ptr >> 1, (this.out_ptr + out_bytes) >> 1);
